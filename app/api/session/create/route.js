@@ -3,8 +3,6 @@ import crypto from 'crypto';
 import { connectDB } from '@/lib/mongodb';
 import Session from '@/lib/models/Session';
 
-const TOKEN_TTL = 17000;
-
 export async function POST(req) {
   const { name, adminPassword } = await req.json();
 
@@ -15,9 +13,9 @@ export async function POST(req) {
 
   const session = await Session.create({
     name:           name || 'Club Session',
-    currentToken:   crypto.randomUUID(),
-    tokenExpiresAt: Date.now() + TOKEN_TTL,
     active:         true,
+    checkinActive:  false,
+    checkoutActive: false,
   });
 
   return NextResponse.json({ sessionId: session._id.toString() });

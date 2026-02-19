@@ -9,7 +9,7 @@ const TOKEN_TTL = 17000;
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const sessionId     = searchParams.get('sessionId');
-  const type          = searchParams.get('type') || 'checkin';
+  const type          = searchParams.get('type');
   const adminPassword = searchParams.get('adminPassword');
 
   if (adminPassword !== process.env.ADMIN_PASSWORD)
@@ -17,14 +17,12 @@ export async function GET(req) {
 
   await connectDB();
 
-  // Rotate token on every QR fetch (called every 15s from admin page)
   const newToken = crypto.randomUUID();
-  const session  = await Session.findByIdAndUpdate(
-    sessionId,
-    { currentToken: newToken, tokenExpiresAt: Date.now() + TOKEN_TTL },
-    { new: true }
-  );
+  const update   = type === 'checkin'
+    ? { checkinToken: newToken,  checkinTokenExpiresAt:  Date.now() + TOKEN_TTL }
+    : { checkoutToken: newToken, checkoutTokenExpiresAt: Date.now() + TOKEN_TTL };
 
+  const session = await Session.findByIdAndUpdate(sessionId, update, { new: true });
   if (!session)
     return NextResponse.json({ error: 'Session not found.' }, { status: 404 });
 
@@ -32,5 +30,5 @@ export async function GET(req) {
   const url  = `${base}/attend?sessionId=${sessionId}&token=${newToken}&type=${type}`;
   const qr   = await QRCode.toDataURL(url, { width: 280, margin: 2 });
 
-  return NextResponse.json({ qr, token: newToken });
+  return NextResponse.json({ qr });
 }
