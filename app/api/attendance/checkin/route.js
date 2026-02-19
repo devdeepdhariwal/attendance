@@ -4,30 +4,37 @@ import Session from '@/lib/models/Session';
 import Attendance from '@/lib/models/Attendance';
 
 export async function POST(req) {
-  const { sessionId, token, name, email, department, fingerprint } = await req.json();
+  const { sessionId, submitToken, name, email, department, fingerprint } = await req.json();
 
-  if (!sessionId || !token || !name || !email || !department || !fingerprint)
+  if (!sessionId || !submitToken || !name || !email || !department || !fingerprint)
     return NextResponse.json({ error: 'All fields are required.' }, { status: 400 });
 
   await connectDB();
 
-  // 1. Validate session
   const session = await Session.findById(sessionId);
   if (!session)
     return NextResponse.json({ error: 'Session not found.' }, { status: 404 });
   if (!session.active)
     return NextResponse.json({ error: 'This session has ended.' }, { status: 403 });
 
-  // 2. Validate rotating token
-  if (session.currentToken !== token || Date.now() > session.tokenExpiresAt)
-    return NextResponse.json({ error: 'QR code expired. Please scan the latest code on screen.' }, { status: 403 });
+  // Validate submit token (2 min window, one-time use)
+  const tokenEntry = session.submitTokens.find(
+    t => t.token === submitToken && !t.used && Date.now() < t.expiresAt
+  );
+  if (!tokenEntry)
+    return NextResponse.json({ error: 'Your session expired. Please scan the QR code again.' }, { status: 403 });
 
-  // 3. Block same device for multiple emails
+  // Mark submit token as used immediately (prevent reuse)
+  await Session.findOneAndUpdate(
+    { _id: sessionId, 'submitTokens.token': submitToken },
+    { $set: { 'submitTokens.$.used': true } }
+  );
+
+  // Block same device for multiple emails
   const sameDevice = await Attendance.findOne({ sessionId, fingerprint });
   if (sameDevice)
-    return NextResponse.json({ error: 'This device has already been used to check in for this session.' }, { status: 409 });
+    return NextResponse.json({ error: 'This device has already been used to check in.' }, { status: 409 });
 
-  // 4. Create record
   try {
     await Attendance.create({
       sessionId,
