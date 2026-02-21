@@ -1,17 +1,17 @@
-import { NextResponse } from 'next/server';
-import crypto from 'crypto';
-import { connectDB } from '@/lib/mongodb';
-import Session from '@/lib/models/Session';
+import { NextResponse }    from 'next/server';
+import crypto              from 'crypto';
+import { connectDB }       from '@/lib/mongodb';
+import Session             from '@/lib/models/Session';
+import { isAuthenticated } from '@/lib/withAuth';
 
 const TOKEN_TTL = 17000;
 
-// POST — open or close a window
-// Body: { sessionId, type: 'checkin'|'checkout', action: 'open'|'close', adminPassword }
 export async function POST(req) {
-  const { sessionId, type, action, adminPassword } = await req.json();
+  const authed = await isAuthenticated();
+  if (!authed)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  if (adminPassword !== process.env.ADMIN_PASSWORD)
-    return NextResponse.json({ error: 'Invalid admin password.' }, { status: 403 });
+  const { sessionId, type, action } = await req.json();
 
   if (!['checkin', 'checkout'].includes(type))
     return NextResponse.json({ error: 'Invalid type.' }, { status: 400 });
@@ -35,7 +35,7 @@ export async function POST(req) {
 
   if (action === 'close') {
     const update = type === 'checkin'
-      ? { checkinActive: false,  checkinToken: null }
+      ? { checkinActive: false, checkinToken: null }
       : { checkoutActive: false, checkoutToken: null };
     await Session.findByIdAndUpdate(sessionId, update);
     return NextResponse.json({ message: `${type} window closed.` });

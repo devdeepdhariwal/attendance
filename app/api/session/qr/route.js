@@ -1,19 +1,20 @@
-import { NextResponse } from 'next/server';
-import crypto from 'crypto';
-import QRCode from 'qrcode';
-import { connectDB } from '@/lib/mongodb';
-import Session from '@/lib/models/Session';
+import { NextResponse }    from 'next/server';
+import crypto              from 'crypto';
+import QRCode              from 'qrcode';
+import { connectDB }       from '@/lib/mongodb';
+import Session             from '@/lib/models/Session';
+import { isAuthenticated } from '@/lib/withAuth';
 
 const TOKEN_TTL = 17000;
 
 export async function GET(req) {
-  const { searchParams } = new URL(req.url);
-  const sessionId     = searchParams.get('sessionId');
-  const type          = searchParams.get('type');
-  const adminPassword = searchParams.get('adminPassword');
+  const authed = await isAuthenticated();
+  if (!authed)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  if (adminPassword !== process.env.ADMIN_PASSWORD)
-    return NextResponse.json({ error: 'Invalid admin password.' }, { status: 403 });
+  const { searchParams } = new URL(req.url);
+  const sessionId = searchParams.get('sessionId');
+  const type      = searchParams.get('type');
 
   await connectDB();
 

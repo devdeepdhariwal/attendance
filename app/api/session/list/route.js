@@ -1,13 +1,12 @@
-import { NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import Session from '@/lib/models/Session';
+import { NextResponse }    from 'next/server';
+import { connectDB }       from '@/lib/mongodb';
+import Session             from '@/lib/models/Session';
+import { isAuthenticated } from '@/lib/withAuth';
 
-export async function GET(req) {
-  const { searchParams } = new URL(req.url);
-  const adminPassword = searchParams.get('adminPassword');
-
-  if (adminPassword !== process.env.ADMIN_PASSWORD)
-    return NextResponse.json({ error: 'Invalid admin password.' }, { status: 403 });
+export async function GET() {
+  const authed = await isAuthenticated();
+  if (!authed)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await connectDB();
 

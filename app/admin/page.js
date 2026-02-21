@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -7,39 +8,46 @@ import autoTable from 'jspdf-autotable';
 const REFRESH_INTERVAL = 15;
 
 export default function AdminPage() {
-  const [password, setPassword]           = useState('');
-  const [loggedIn, setLoggedIn]           = useState(false);
-  const [activeTab, setActiveTab]         = useState('live'); // 'live' | 'records'
+  const router = useRouter();
+
+  const [activeTab, setActiveTab] = useState('live');
 
   // Live session state
-  const [sessionName, setSessionName]     = useState('');
-  const [sessionId, setSessionId]         = useState(null);
-  const [sessionActive, setSessionActive] = useState(false);
-  const [creating, setCreating]           = useState(false);
-  const [error, setError]                 = useState('');
-  const [checkinActive, setCheckinActive]   = useState(false);
-  const [checkoutActive, setCheckoutActive] = useState(false);
-  const [checkinQR, setCheckinQR]           = useState('');
-  const [checkoutQR, setCheckoutQR]         = useState('');
-  const [checkinCountdown, setCheckinCountdown]   = useState(REFRESH_INTERVAL);
-  const [checkoutCountdown, setCheckoutCountdown] = useState(REFRESH_INTERVAL);
+  const [sessionName,      setSessionName]      = useState('');
+  const [sessionId,        setSessionId]        = useState(null);
+  const [sessionActive,    setSessionActive]    = useState(false);
+  const [creating,         setCreating]         = useState(false);
+  const [error,            setError]            = useState('');
+  const [checkinActive,    setCheckinActive]    = useState(false);
+  const [checkoutActive,   setCheckoutActive]   = useState(false);
+  const [checkinQR,        setCheckinQR]        = useState('');
+  const [checkoutQR,       setCheckoutQR]       = useState('');
+  const [checkinCountdown, setCheckinCountdown] = useState(REFRESH_INTERVAL);
+  const [checkoutCountdown,setCheckoutCountdown]= useState(REFRESH_INTERVAL);
   const [report, setReport] = useState({ complete: [], incomplete: [], checkedIn: 0, total: 0 });
 
   // Records tab state
-  const [allSessions, setAllSessions]       = useState([]);
-  const [selectedSessionId, setSelectedSessionId] = useState('');
-  const [selectedSessionName, setSelectedSessionName] = useState('');
-  const [recordsData, setRecordsData]       = useState(null);
-  const [loadingSessions, setLoadingSessions] = useState(false);
-  const [loadingRecords, setLoadingRecords]   = useState(false);
+  const [allSessions,        setAllSessions]        = useState([]);
+  const [selectedSessionId,  setSelectedSessionId]  = useState('');
+  const [selectedSessionName,setSelectedSessionName]= useState('');
+  const [recordsData,        setRecordsData]        = useState(null);
+  const [loadingSessions,    setLoadingSessions]    = useState(false);
+  const [loadingRecords,     setLoadingRecords]     = useState(false);
 
   const checkinTimer  = useRef(null);
   const checkoutTimer = useRef(null);
   const reportTimer   = useRef(null);
 
-  // ── QR ────────────────────────────────────────────────────────────────────
+  // ── Auth error handler ─────────────────────────────────────────────────────
+  function handleUnauth(res) {
+    if (res.status === 401) { router.push('/login'); return true; }
+    return false;
+  }
+
+  // ── QR ─────────────────────────────────────────────────────────────────────
   async function fetchQR(type) {
-    const res  = await fetch(`/api/session/qr?sessionId=${sessionId}&type=${type}&adminPassword=${password}`);
+    const res  = await fetch(`/api/session/qr?sessionId=${sessionId}&type=${type}`);
+    if (handleUnauth(res)) return;
     const data = await res.json();
     if (type === 'checkin')  setCheckinQR(data.qr  || '');
     if (type === 'checkout') setCheckoutQR(data.qr || '');
@@ -59,35 +67,38 @@ export default function AdminPage() {
   }
 
   async function toggleWindow(type, action) {
-    await fetch('/api/session/window', {
-      method: 'POST',
+    const res = await fetch('/api/session/window', {
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, type, action, adminPassword: password }),
+      body:    JSON.stringify({ sessionId, type, action }),
     });
+    if (handleUnauth(res)) return;
     if (type === 'checkin') {
-      if (action === 'open') { setCheckinActive(true); await fetchQR('checkin'); startQRLoop('checkin'); }
-      else { setCheckinActive(false); setCheckinQR(''); clearInterval(checkinTimer.current); }
+      if (action === 'open') { setCheckinActive(true);  await fetchQR('checkin');  startQRLoop('checkin');  }
+      else                   { setCheckinActive(false); setCheckinQR('');  clearInterval(checkinTimer.current);  }
     } else {
-      if (action === 'open') { setCheckoutActive(true); await fetchQR('checkout'); startQRLoop('checkout'); }
-      else { setCheckoutActive(false); setCheckoutQR(''); clearInterval(checkoutTimer.current); }
+      if (action === 'open') { setCheckoutActive(true);  await fetchQR('checkout'); startQRLoop('checkout'); }
+      else                   { setCheckoutActive(false); setCheckoutQR(''); clearInterval(checkoutTimer.current); }
     }
   }
 
-  // ── Report ─────────────────────────────────────────────────────────────────
+  // ── Report ──────────────────────────────────────────────────────────────────
   async function fetchReport(sid) {
-    const res  = await fetch(`/api/session/report?sessionId=${sid}&adminPassword=${password}`);
+    const res  = await fetch(`/api/session/report?sessionId=${sid}`);
+    if (handleUnauth(res)) return;
     const data = await res.json();
     if (res.ok) setReport(data);
   }
 
-  // ── Create / End session ──────────────────────────────────────────────────
+  // ── Create / End session ───────────────────────────────────────────────────
   async function createSession() {
     setCreating(true); setError('');
     const res  = await fetch('/api/session/create', {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: sessionName || 'Club Session', adminPassword: password }),
+      body:    JSON.stringify({ name: sessionName || 'Club Session' }),
     });
+    if (handleUnauth(res)) { setCreating(false); return; }
     const data = await res.json();
     if (!res.ok) { setError(data.error); setCreating(false); return; }
     setSessionId(data.sessionId);
@@ -99,11 +110,12 @@ export default function AdminPage() {
 
   async function endSession() {
     if (!confirm('End the entire session?')) return;
-    await fetch('/api/session/end', {
-      method: 'POST',
+    const res = await fetch('/api/session/end', {
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, adminPassword: password }),
+      body:    JSON.stringify({ sessionId }),
     });
+    if (handleUnauth(res)) return;
     clearInterval(checkinTimer.current);
     clearInterval(checkoutTimer.current);
     clearInterval(reportTimer.current);
@@ -114,10 +126,11 @@ export default function AdminPage() {
     setSessionName('');
   }
 
-  // ── Records tab ───────────────────────────────────────────────────────────
+  // ── Records tab ────────────────────────────────────────────────────────────
   async function loadAllSessions() {
     setLoadingSessions(true);
-    const res  = await fetch(`/api/session/list?adminPassword=${password}`);
+    const res  = await fetch('/api/session/list');
+    if (handleUnauth(res)) { setLoadingSessions(false); return; }
     const data = await res.json();
     if (res.ok) setAllSessions(data.sessions);
     setLoadingSessions(false);
@@ -128,13 +141,14 @@ export default function AdminPage() {
     setSelectedSessionId(sid);
     setSelectedSessionName(sname);
     setRecordsData(null);
-    const res  = await fetch(`/api/session/report?sessionId=${sid}&adminPassword=${password}`);
+    const res  = await fetch(`/api/session/report?sessionId=${sid}`);
+    if (handleUnauth(res)) { setLoadingRecords(false); return; }
     const data = await res.json();
     if (res.ok) setRecordsData(data);
     setLoadingRecords(false);
   }
 
-  // ── Export functions ──────────────────────────────────────────────────────
+  // ── Export ─────────────────────────────────────────────────────────────────
   function getRows(data) {
     return [...(data.complete || []), ...(data.incomplete || [])].map(r => [
       r.name, r.email, r.rollNo || '—', r.department,
@@ -145,10 +159,7 @@ export default function AdminPage() {
   }
 
   function exportCSV(data, filename) {
-    const rows = [
-      ['Name', 'Email', 'Roll No', 'Department', 'Check-In', 'Check-Out', 'Status'],
-      ...getRows(data),
-    ];
+    const rows = [['Name','Email','Roll No','Department','Check-In','Check-Out','Status'], ...getRows(data)];
     const csv  = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
     const a    = document.createElement('a');
     a.href     = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -157,32 +168,25 @@ export default function AdminPage() {
   }
 
   function exportExcel(data, filename) {
-    const rows = [
-      ['Name', 'Email', 'Roll No', 'Department', 'Check-In', 'Check-Out', 'Status'],
-      ...getRows(data),
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    // Auto column widths
-    ws['!cols'] = [20, 28, 12, 14, 12, 12, 10].map(w => ({ wch: w }));
-    const wb = XLSX.utils.book_new();
+    const rows = [['Name','Email','Roll No','Department','Check-In','Check-Out','Status'], ...getRows(data)];
+    const ws   = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [20,28,12,14,12,12,10].map(w => ({ wch: w }));
+    const wb   = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
     XLSX.writeFile(wb, `${filename}.xlsx`);
   }
 
-  function exportPDF(data, filename, sessionName) {
+  function exportPDF(data, filename, sname) {
     const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text(`Attendance Report`, 14, 15);
-    doc.setFontSize(11);
-    doc.setTextColor(100);
-    doc.text(`Session: ${sessionName}`, 14, 23);
+    doc.setFontSize(16); doc.text('Attendance Report', 14, 15);
+    doc.setFontSize(11); doc.setTextColor(100);
+    doc.text(`Session: ${sname}`, 14, 23);
     doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 29);
     doc.text(`Total: ${data.checkedIn} checked in | ${data.total} complete`, 14, 35);
-
     autoTable(doc, {
       startY: 42,
-      head: [['Name', 'Email', 'Roll No', 'Dept', 'Check-In', 'Check-Out', 'Status']],
-      body: getRows(data),
+      head:   [['Name','Email','Roll No','Dept','Check-In','Check-Out','Status']],
+      body:   getRows(data),
       styles:     { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: [79, 70, 229] },
       alternateRowStyles: { fillColor: [248, 249, 250] },
@@ -190,7 +194,6 @@ export default function AdminPage() {
     doc.save(`${filename}.pdf`);
   }
 
-  // Switch to records tab → auto-load sessions
   function goToRecords() {
     setActiveTab('records');
     loadAllSessions();
@@ -202,26 +205,7 @@ export default function AdminPage() {
     clearInterval(reportTimer.current);
   }, []);
 
-  // ── Login ──────────────────────────────────────────────────────────────────
-  if (!loggedIn) return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-slate-800 mb-2">🔐 Admin Login</h1>
-        <p className="text-slate-500 text-sm mb-6">Enter your admin password to continue.</p>
-        <input type="password" placeholder="Admin Password"
-          value={password} onChange={e => setPassword(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && setLoggedIn(true)}
-          className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-        />
-        <button onClick={() => setLoggedIn(true)}
-          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg text-sm transition-colors">
-          Login →
-        </button>
-      </div>
-    </div>
-  );
-
-  // ── Dashboard ──────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-100 p-4 md:p-8">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -245,7 +229,7 @@ export default function AdminPage() {
           ))}
         </div>
 
-        {/* ═══════════════ LIVE SESSION TAB ═══════════════ */}
+        {/* ══════════ LIVE SESSION TAB ══════════ */}
         {activeTab === 'live' && (
           <>
             {!sessionActive ? (
@@ -279,22 +263,18 @@ export default function AdminPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {[
                     {
-                      type: 'checkin', label: '🟢 Check-In Window',
-                      sub: 'Open when session starts',
-                      active: checkinActive, qr: checkinQR,
-                      countdown: checkinCountdown,
-                      openColor:  'bg-green-500 hover:bg-green-600',
+                      type: 'checkin',  label: '🟢 Check-In Window',  sub: 'Open when session starts',
+                      active: checkinActive,  qr: checkinQR,  countdown: checkinCountdown,
+                      openColor: 'bg-green-500 hover:bg-green-600',
                       borderColor: 'border-green-200', barColor: 'bg-green-500',
-                      badgeColor: checkinActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500',
+                      badgeColor: checkinActive  ? 'bg-green-100 text-green-700'  : 'bg-slate-100 text-slate-500',
                     },
                     {
-                      type: 'checkout', label: '🟡 Check-Out Window',
-                      sub: 'Open when session ends',
-                      active: checkoutActive, qr: checkoutQR,
-                      countdown: checkoutCountdown,
+                      type: 'checkout', label: '🟡 Check-Out Window', sub: 'Open when session ends',
+                      active: checkoutActive, qr: checkoutQR, countdown: checkoutCountdown,
                       openColor: 'bg-amber-500 hover:bg-amber-600',
                       borderColor: 'border-amber-200', barColor: 'bg-amber-500',
-                      badgeColor: checkoutActive ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500',
+                      badgeColor: checkoutActive ? 'bg-amber-100 text-amber-700'  : 'bg-slate-100 text-slate-500',
                     },
                   ].map(w => (
                     <div key={w.type} className="bg-white rounded-2xl shadow p-6">
@@ -309,7 +289,8 @@ export default function AdminPage() {
                       </div>
                       {w.active && w.qr && (
                         <div className="text-center mb-4">
-                          <img src={w.qr} alt={w.label} className={`w-48 h-48 mx-auto rounded-lg border ${w.borderColor}`} />
+                          <img src={w.qr} alt={w.label}
+                            className={`w-48 h-48 mx-auto rounded-lg border ${w.borderColor}`} />
                           <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                             <div className={`h-full ${w.barColor} rounded-full transition-all duration-1000`}
                               style={{ width: `${(w.countdown / REFRESH_INTERVAL) * 100}%` }} />
@@ -335,7 +316,7 @@ export default function AdminPage() {
                 <div className="grid grid-cols-3 gap-4">
                   {[
                     { num: report.checkedIn,              label: 'Checked In',     color: 'text-indigo-600' },
-                    { num: report.total,                   label: 'Complete ✅',    color: 'text-green-600'  },
+                    { num: report.total,                  label: 'Complete ✅',    color: 'text-green-600'  },
                     { num: report.incomplete?.length || 0, label: 'Not Out Yet ⏳', color: 'text-amber-600'  },
                   ].map(({ num, label, color }) => (
                     <div key={label} className="bg-white rounded-xl shadow p-4 text-center">
@@ -345,7 +326,7 @@ export default function AdminPage() {
                   ))}
                 </div>
 
-                {/* Live table with export */}
+                {/* Live table */}
                 <div className="bg-white rounded-2xl shadow p-6">
                   <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
                     <h2 className="text-lg font-semibold text-slate-800">📊 Live Attendance</h2>
@@ -371,11 +352,9 @@ export default function AdminPage() {
           </>
         )}
 
-        {/* ═══════════════ PAST RECORDS TAB ═══════════════ */}
+        {/* ══════════ PAST RECORDS TAB ══════════ */}
         {activeTab === 'records' && (
           <div className="space-y-6">
-
-            {/* Session selector */}
             <div className="bg-white rounded-2xl shadow p-6">
               <h2 className="text-lg font-semibold text-slate-700 mb-4">📁 Select a Session</h2>
               {loadingSessions ? (
@@ -385,8 +364,7 @@ export default function AdminPage() {
               ) : (
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {allSessions.map(s => (
-                    <button key={s._id}
-                      onClick={() => loadRecords(s._id, s.name)}
+                    <button key={s._id} onClick={() => loadRecords(s._id, s.name)}
                       className={`w-full text-left px-4 py-3 rounded-xl border transition-colors
                         ${selectedSessionId === s._id
                           ? 'border-indigo-400 bg-indigo-50'
@@ -396,7 +374,7 @@ export default function AdminPage() {
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-slate-400">
                             {new Date(s.createdAt).toLocaleDateString('en-IN', {
-                              day: 'numeric', month: 'short', year: 'numeric'
+                              day: 'numeric', month: 'short', year: 'numeric',
                             })}
                           </span>
                           <span className={`px-2 py-0.5 rounded-full text-xs font-semibold
@@ -411,7 +389,6 @@ export default function AdminPage() {
               )}
             </div>
 
-            {/* Records for selected session */}
             {selectedSessionId && (
               <div className="bg-white rounded-2xl shadow p-6">
                 {loadingRecords ? (
@@ -421,15 +398,14 @@ export default function AdminPage() {
                   </div>
                 ) : recordsData ? (
                   <>
-                    {/* Header + Stats */}
                     <div className="flex items-start justify-between flex-wrap gap-4 mb-6">
                       <div>
                         <h2 className="text-lg font-semibold text-slate-800">{selectedSessionName}</h2>
                         <div className="flex gap-4 mt-2">
                           {[
-                            { num: recordsData.checkedIn,              label: 'Checked In',  color: 'text-indigo-600' },
-                            { num: recordsData.total,                   label: 'Complete',    color: 'text-green-600'  },
-                            { num: recordsData.incomplete?.length || 0, label: 'Pending',     color: 'text-amber-600'  },
+                            { num: recordsData.checkedIn,               label: 'Checked In', color: 'text-indigo-600' },
+                            { num: recordsData.total,                   label: 'Complete',   color: 'text-green-600'  },
+                            { num: recordsData.incomplete?.length || 0, label: 'Pending',    color: 'text-amber-600'  },
                           ].map(({ num, label, color }) => (
                             <div key={label} className="text-center">
                               <p className={`text-2xl font-black ${color}`}>{num}</p>
@@ -438,30 +414,24 @@ export default function AdminPage() {
                           ))}
                         </div>
                       </div>
-
-                      {/* Export buttons */}
                       <div className="flex flex-col gap-2">
                         <p className="text-xs text-slate-400 font-medium">Export as:</p>
                         <div className="flex gap-2">
-                          <button
-                            onClick={() => exportCSV(recordsData, `attendance_${selectedSessionName.replace(/\s+/g,'_')}`)}
+                          <button onClick={() => exportCSV(recordsData, `attendance_${selectedSessionName.replace(/\s+/g,'_')}`)}
                             className="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors">
                             📄 CSV
                           </button>
-                          <button
-                            onClick={() => exportExcel(recordsData, `attendance_${selectedSessionName.replace(/\s+/g,'_')}`)}
+                          <button onClick={() => exportExcel(recordsData, `attendance_${selectedSessionName.replace(/\s+/g,'_')}`)}
                             className="bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors">
                             📊 Excel
                           </button>
-                          <button
-                            onClick={() => exportPDF(recordsData, `attendance_${selectedSessionName.replace(/\s+/g,'_')}`, selectedSessionName)}
+                          <button onClick={() => exportPDF(recordsData, `attendance_${selectedSessionName.replace(/\s+/g,'_')}`, selectedSessionName)}
                             className="bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors">
                             📑 PDF
                           </button>
                         </div>
                       </div>
                     </div>
-
                     <AttendanceTable rows={[...(recordsData.complete || []), ...(recordsData.incomplete || [])]} />
                   </>
                 ) : null}
@@ -475,17 +445,16 @@ export default function AdminPage() {
   );
 }
 
-// ── Shared table component ─────────────────────────────────────────────────
+// ── Shared table ───────────────────────────────────────────────────────────
 function AttendanceTable({ rows }) {
-  if (rows.length === 0) return (
-    <p className="text-center text-slate-400 py-8 text-sm">No records found.</p>
-  );
+  if (rows.length === 0)
+    return <p className="text-center text-slate-400 py-8 text-sm">No records found.</p>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-slate-50 text-slate-600 text-left">
-            {['#', 'Name', 'Email', 'Roll No', 'Department', 'Check-In', 'Check-Out', 'Status'].map(h => (
+            {['#','Name','Email','Roll No','Department','Check-In','Check-Out','Status'].map(h => (
               <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>
             ))}
           </tr>
